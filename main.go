@@ -34,6 +34,7 @@ var (
 
 func main() {
 	log := usvc.GetLogger(false, 0)
+	usvc.BannerStdout("polybar-timezones", "v0.0.1", "TODO")
 
 	endTabs := secsToTabs(86400)
 	locs := getLocations(log)
