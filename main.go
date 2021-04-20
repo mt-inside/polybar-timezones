@@ -35,12 +35,6 @@ var (
 func main() {
 	log := usvc.GetLogger(false, 0)
 
-	now := time.Now()
-	//now := time.Date(2021, 04, 19, 2, 0, 0, 0, time.Local)
-	//now := time.Date(2021, 04, 19, 22, 0, 0, 0, time.Local)
-	lastMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	nowSecs := now.Sub(lastMidnight).Seconds()
-	_, nowOff := now.Zone()
 	endTabs := secsToTabs(86400)
 	locs := getLocations(log)
 
@@ -49,24 +43,31 @@ func main() {
 		tabs int
 	}
 
-	var namesTabs []nameTabs
-	for _, loc := range locs {
-		there := now.In(loc)
-		name, offset := there.Zone()
-		name = translateCity(loc, name)
-		if loc == time.Local {
-			name = hereRune
-		}
-		tabs := secsToTabs((offset - nowOff + int(nowSecs) + 86400) % 86400)
-
-		namesTabs = append(namesTabs, nameTabs{name, tabs})
-	}
-
-	sort.SliceStable(namesTabs, func(i, j int) bool {
-		return namesTabs[i].tabs < namesTabs[j].tabs
-	})
-
 	for _ = range time.NewTicker(time.Second).C { // TODO: optimise
+		now := time.Now()
+		//now := time.Date(2021, 04, 19, 2, 0, 0, 0, time.Local)
+		//now := time.Date(2021, 04, 19, 22, 0, 0, 0, time.Local)
+		lastMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		nowSecs := now.Sub(lastMidnight).Seconds()
+		_, nowOff := now.Zone()
+
+		var namesTabs []nameTabs
+		for _, loc := range locs {
+			there := now.In(loc)
+			name, offset := there.Zone()
+			name = translateCity(loc, name)
+			if loc == time.Local {
+				name = hereRune
+			}
+			tabs := secsToTabs((offset - nowOff + int(nowSecs) + 86400) % 86400)
+
+			namesTabs = append(namesTabs, nameTabs{name, tabs})
+		}
+
+		sort.SliceStable(namesTabs, func(i, j int) bool {
+			return namesTabs[i].tabs < namesTabs[j].tabs
+		})
+
 		var sb strings.Builder
 		curTabs := 0
 		for _, nT := range namesTabs {
