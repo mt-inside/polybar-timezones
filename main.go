@@ -17,11 +17,11 @@ var (
 		// "America/New_York":    "🗽",
 		// "Europe/Madrid":       "🇪🇸",
 		// "Europe/Dublin":       "🇮🇪",
+		"Asia/Singapore":      "sg",
 		"Asia/Kolkata":        "in",
 		"America/Los_Angeles": "sf",
 		"America/New_York":    "ny",
-		"Europe/Madrid":       "bcn",
-		"Europe/Dublin":       "dub",
+		"Europe/Madrid":       "es",
 	}
 
 	hereRune = "^"
