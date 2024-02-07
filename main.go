@@ -8,6 +8,8 @@ import (
 
 	"github.com/tetratelabs/telemetry"
 	"github.com/tetratelabs/telemetry/scope"
+
+	"github.com/mt-inside/http-log/pkg/zaplog"
 )
 
 var cities = map[string]string{
@@ -33,26 +35,31 @@ const (
 	DAY         = 86400
 	WORK_START  = 9
 	WORK_END    = 18
-	//WORK_RUNE   = "▁"
-	//HERE_RUNE = "📍"
+	/* The issue with characters like this, is that if polybar is rendering
+	* us, for each character is searches its list of fonts until one
+	* contains the symbol. Thus the "ascii", eg ' ' and "es" will come from
+	* one font and these "drawing" ones will come from another. Even if
+	* both are fixed-width and you have them the same size, they're very
+	* likely different widths */
+	// WORK_RUNE   = "▁"
+	// HERE_RUNE   = "📍"
 	WORK_RUNE = "_"
 	HERE_RUNE = "|"
 )
 
 var (
-	//refLoc *time.Location = time.FixedZone("foo", -4*60*60)
+	// refLoc *time.Location = time.FixedZone("foo", -4*60*60)
 	refLoc *time.Location = time.Local
 	log                   = scope.Register("main", "main package")
 )
 
 func main() {
-	// TODO: workout how to log to stderr
-	//rootLog := tetlog.NewFlattened()
-	//scope.UseLogger(rootLog)
+	rootLog := zaplog.New() // Logs to stderr
+	scope.UseLogger(rootLog)
 	scope.SetAllScopes(telemetry.LevelDebug)
 
 	now := time.Now()
-	//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 6, 0, 0, 0, time.Local)
+	// now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 6, 0, 0, 0, time.Local)
 	refTime := now.In(refLoc)
 	_, refOffset := refTime.Zone()
 	startOffset := refOffset - DAY/2
@@ -63,13 +70,10 @@ func main() {
 	for _, locName := range locs {
 		there := now.In(locName.loc)
 		zoneName, offset := there.Zone()
-		p := (offset - startOffset) % DAY
-		if p < 0 {
-			p = DAY + p
-		}
-		log.Info("there", "zone", zoneName, "offset", offset, "pretty", locName.name, "p", p)
+		tabs := offset2Tabs(offset, startOffset)
+		log.Info("there", "zone", zoneName, "offset", offset, "pretty", locName.name, "tabs", tabs)
 
-		namesTabs = append(namesTabs, nameTabs{locName.name, int(float64(p) / DAY * PRINT_WIDTH)})
+		namesTabs = append(namesTabs, nameTabs{locName.name, tabs})
 	}
 	sort.SliceStable(namesTabs, func(i, j int) bool {
 		return namesTabs[i].tabs < namesTabs[j].tabs
@@ -93,22 +97,11 @@ func main() {
 
 	workStart := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_START, 0, 0, 0, refLoc)
 	workStartDiff := int(workStart.Sub(refTime).Seconds())
-	pS := (workStartDiff - startOffset) % DAY
-	if pS < 0 {
-		pS = DAY + pS
-	}
-	workStartTabs := int(float64(pS) / DAY * PRINT_WIDTH)
-	//workStartTabs := int((0.5 + (float64(workStartDiff) / DAY)) * PRINT_WIDTH)
+	workStartTabs := offset2Tabs(workStartDiff, startOffset)
 	workEnd := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_END, 0, 0, 0, refLoc)
 	workEndDiff := int(workEnd.Sub(refTime).Seconds())
-	pE := (workEndDiff - startOffset) % DAY
-	if pE < 0 {
-		pE = DAY + pE
-	}
-	workEndTabs := int(float64(pE) / DAY * PRINT_WIDTH)
-	//workEndTabs := int((0.5 + (float64(workEndDiff) / DAY)) * PRINT_WIDTH)
-	log.Info("work offsets", "start", workStartDiff, "end", workEndDiff)
-	log.Info("work tabs", "start", workStartTabs, "end", workEndTabs)
+	workEndTabs := offset2Tabs(workEndDiff, startOffset)
+	log.Info("work", "start offset", workStartDiff, "start tabs", workStartTabs, "end offset", workEndDiff, "end tabs", workEndTabs)
 
 	runes := []rune(sb.String())
 	var render string
@@ -119,6 +112,14 @@ func main() {
 	}
 
 	fmt.Println(render)
+}
+
+func offset2Tabs(offset, startOffset int) int {
+	p := (offset - startOffset) % DAY
+	if p < 0 {
+		p = DAY + p
+	}
+	return int(float64(p) / DAY * PRINT_WIDTH)
 }
 
 type locName struct {
