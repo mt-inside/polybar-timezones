@@ -1,5 +1,11 @@
 package main
 
+/* TODO
+* - should only be as wide as the timezones we have configured; don't show +/-12h just for the sake of it
+* - don't wrap; nz is >12 diff but is in the future so should be rendered to the right - see the variable width thing; should be more than 12hs' tabs in front of us
+* - test both of these by doing this and setting refZone to Alaska: nothing should be behind and everything ahead. Just cause we live in UTC0 we're used to being in the middle
+ */
+
 import (
 	"fmt"
 	"sort"
