@@ -6,123 +6,138 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
-	"github.com/mt-inside/go-usvc"
+	"github.com/tetratelabs/telemetry"
+	"github.com/tetratelabs/telemetry/scope"
+)
+
+var cities = map[string]string{
+	"Asia/Shanghai":       "cn",
+	"Asia/Kolkata":        "in",
+	"America/Los_Angeles": "sf",
+	"America/New_York":    "ny",
+	"Pacific/Auckland":    "nz",
+	// "Asia/Shanghai":        "🇨🇳",
+	// "Asia/Kolkata":         "🇮🇳",
+	// "America/Los_Angeles":  "🇺🇸",
+	// "America/New_York":     "🇺🇸",
+	// "Pacific/Auckland":     "🇳🇿",
+}
+
+type nameTabs struct {
+	name string
+	tabs int
+}
+
+const (
+	PRINT_WIDTH = 50
+	DAY         = 86400
+	WORK_START  = 9
+	WORK_END    = 18
+	//WORK_RUNE   = "▁"
+	//HERE_RUNE = "📍"
+	WORK_RUNE = "_"
+	HERE_RUNE = "|"
 )
 
 var (
-	cities = map[string]string{
-		// "Asia/Kolkata":        "🇮🇳",
-		// "America/Los_Angeles": "🌉",
-		// "America/New_York":    "🗽",
-		// "Europe/Madrid":       "🇪🇸",
-		// "Europe/Dublin":       "🇮🇪",
-		"Asia/Singapore":      "sg",
-		"Asia/Kolkata":        "in",
-		"America/Los_Angeles": "sf",
-		"America/New_York":    "ny",
-		"Europe/Madrid":       "es",
-	}
-
-	hereRune = "^"
-
-	printDuration = 30 * time.Minute
+	//refLoc *time.Location = time.FixedZone("foo", -4*60*60)
+	refLoc *time.Location = time.Local
+	log                   = scope.Register("main", "main package")
 )
 
-// TODO fun: Write alternate centered on current time (other timezones also fixed, 9-5 markers move)
-// TODO: cities to be tagged with names, eg a person (emoji like flags would be fun)
-
 func main() {
-	log := usvc.GetLogger(false, 0)
-	usvc.BannerStdout("polybar-timezones", "v0.0.1", "TODO")
+	// TODO: workout how to log to stderr
+	//rootLog := tetlog.NewFlattened()
+	//scope.UseLogger(rootLog)
+	scope.SetAllScopes(telemetry.LevelDebug)
 
-	endTabs := secsToTabs(86400)
-	locs := getLocations(log)
+	now := time.Now()
+	//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 6, 0, 0, 0, time.Local)
+	refTime := now.In(refLoc)
+	_, refOffset := refTime.Zone()
+	startOffset := refOffset - DAY/2
+	log.Info("range", "ref", refOffset, "start", startOffset)
 
-	type nameTabs struct {
-		name string
-		tabs int
+	locs := getLocations()
+	var namesTabs []nameTabs
+	for _, locName := range locs {
+		there := now.In(locName.loc)
+		zoneName, offset := there.Zone()
+		p := (offset - startOffset) % DAY
+		if p < 0 {
+			p = DAY + p
+		}
+		log.Info("there", "zone", zoneName, "offset", offset, "pretty", locName.name, "p", p)
+
+		namesTabs = append(namesTabs, nameTabs{locName.name, int(float64(p) / DAY * PRINT_WIDTH)})
+	}
+	sort.SliceStable(namesTabs, func(i, j int) bool {
+		return namesTabs[i].tabs < namesTabs[j].tabs
+	})
+
+	var sb strings.Builder
+	curTabs := 0
+	for _, nT := range namesTabs {
+		if nT.tabs >= curTabs {
+			sb.WriteString(strings.Repeat(" ", nT.tabs-curTabs)) // TODO: back off by half of the string's length. Everything should Just Work if you do that to all of them
+			curTabs = nT.tabs
+			sb.WriteString(nT.name)         // The return value is bytes written, which isn't too useful
+			curTabs += len([]rune(nT.name)) // This isn't perfect; we really want the number of Grapheme Clusters, and even then, that's not necessarily the print-width in every font.
+			log.Debug("width calc", "name", nT.name, "len", len([]rune(nT.name)))
+		}
 	}
 
-	for _ = range time.NewTicker(time.Second).C { // TODO: optimise
-		now := time.Now()
-		//now := time.Date(2021, 04, 19, 2, 0, 0, 0, time.Local)
-		//now := time.Date(2021, 04, 19, 22, 0, 0, 0, time.Local)
-		lastMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-		nowSecs := now.Sub(lastMidnight).Seconds()
-		_, nowOff := now.Zone()
-
-		var namesTabs []nameTabs
-		for _, loc := range locs {
-			there := now.In(loc)
-			name, offset := there.Zone()
-			name = translateCity(loc, name)
-			if loc == time.Local {
-				name = hereRune
-			}
-			tabs := secsToTabs((offset - nowOff + int(nowSecs) + 86400) % 86400)
-
-			namesTabs = append(namesTabs, nameTabs{name, tabs})
-		}
-
-		sort.SliceStable(namesTabs, func(i, j int) bool {
-			return namesTabs[i].tabs < namesTabs[j].tabs
-		})
-
-		var sb strings.Builder
-		curTabs := 0
-		for _, nT := range namesTabs {
-			if nT.tabs >= curTabs {
-				sb.WriteString(strings.Repeat(" ", nT.tabs-curTabs)) // TODO: back off by half of the string's length. Everything should Just Work if you do that to all of them
-				curTabs = nT.tabs
-				sb.WriteString(nT.name)         // The return value is bytes written, which isn't too useful
-				curTabs += len([]rune(nT.name)) // This isn't perfect; we really want the number of Grapheme Clusters, and even then, that's not necessarily the print-width in every font.
-				log.V(1).Info("width calc", "name", nT.name, "len", len([]rune(nT.name)))
-			}
-		}
-
-		if endTabs >= curTabs {
-			sb.WriteString(strings.Repeat(" ", endTabs-curTabs))
-		}
-
-		runes := []rune(sb.String())
-		workStart := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
-		workEnd := time.Date(now.Year(), now.Month(), now.Day(), 18, 0, 0, 0, now.Location())
-		workStartTabs := timeToTabs(lastMidnight, workStart)
-		workEndTabs := timeToTabs(lastMidnight, workEnd)
-
-		render := string(runes[0:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:workEndTabs]), " ", "_") + string(runes[workEndTabs:endTabs])
-		fmt.Printf("%s\n", render)
+	if curTabs < PRINT_WIDTH {
+		sb.WriteString(strings.Repeat(" ", PRINT_WIDTH-curTabs))
 	}
-}
 
-func secsToTabs(secsEast int) int {
-	return secsEast / int(printDuration.Seconds())
-}
-
-func timeToTabs(lastMidnight, t time.Time) int {
-	return secsToTabs(int(t.Sub(lastMidnight).Seconds()))
-}
-
-func translateCity(loc *time.Location, def string) string {
-	if friendly := cities[loc.String()]; friendly != "" {
-		return friendly
+	workStart := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_START, 0, 0, 0, refLoc)
+	workStartDiff := int(workStart.Sub(refTime).Seconds())
+	pS := (workStartDiff - startOffset) % DAY
+	if pS < 0 {
+		pS = DAY + pS
 	}
-	return def
+	workStartTabs := int(float64(pS) / DAY * PRINT_WIDTH)
+	//workStartTabs := int((0.5 + (float64(workStartDiff) / DAY)) * PRINT_WIDTH)
+	workEnd := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_END, 0, 0, 0, refLoc)
+	workEndDiff := int(workEnd.Sub(refTime).Seconds())
+	pE := (workEndDiff - startOffset) % DAY
+	if pE < 0 {
+		pE = DAY + pE
+	}
+	workEndTabs := int(float64(pE) / DAY * PRINT_WIDTH)
+	//workEndTabs := int((0.5 + (float64(workEndDiff) / DAY)) * PRINT_WIDTH)
+	log.Info("work offsets", "start", workStartDiff, "end", workEndDiff)
+	log.Info("work tabs", "start", workStartTabs, "end", workEndTabs)
+
+	runes := []rune(sb.String())
+	var render string
+	if workEndTabs < workStartTabs {
+		render = strings.ReplaceAll(string(runes[0:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:PRINT_WIDTH]), " ", WORK_RUNE)
+	} else {
+		render = string(runes[0:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:PRINT_WIDTH])
+	}
+
+	fmt.Println(render)
 }
 
-func getLocations(log logr.Logger) []*time.Location {
-	locs := []*time.Location{}
+type locName struct {
+	loc  *time.Location
+	name string
+}
 
-	locs = append(locs, time.Local) // Must come first (and must use stable sort later)
-	for c, _ := range cities {
-		loc, err := time.LoadLocation(c)
+func getLocations() []locName {
+	var locs []locName
+
+	locs = append(locs, locName{refLoc, HERE_RUNE})
+	for city, printName := range cities {
+		loc, err := time.LoadLocation(city)
 		if err != nil {
-			log.Info("Can't load timezone", "city", c)
+			log.Info("Can't load timezone", "city", city)
 			continue
 		}
 
-		locs = append(locs, loc)
+		locs = append(locs, locName{loc, printName})
 	}
 
 	return locs
