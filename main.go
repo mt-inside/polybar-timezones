@@ -6,8 +6,11 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/tetratelabs/telemetry"
@@ -35,7 +38,7 @@ type nameTabs struct {
 }
 
 const (
-	DAY_WIDTH  = 24
+	DAY_WIDTH  = 50
 	DAY        = 86400
 	WORK_START = 9
 	WORK_END   = 18
@@ -57,21 +60,21 @@ var (
 	log                   = scope.Register("main", "main package")
 )
 
-// TODO: long-lived
-
 func main() {
 	rootLog := zaplog.New() // Logs to stderr
 	scope.UseLogger(rootLog)
 	scope.SetAllScopes(telemetry.LevelDebug)
 
-	now := time.Now()
-	//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 4, 0, 0, 0, refLoc)
-	//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 12, 0, 0, 0, time.Local)
+	signalCh := make(chan os.Signal, 2)
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+
+	_, refOffset := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, refLoc).Zone()
+	refTabs := offset2Tabs(refOffset)
 
 	locs := getLocations()
 	var namesTabs []nameTabs
 	for _, locName := range locs {
-		there := now.In(locName.loc) // This could be any time, but it needs to be like this year so the timezones actually exist
+		there := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, locName.loc) // This could be any time, but it needs to be like this year so the timezones actually exist
 		zoneName, offset := there.Zone()
 		tabs := offset2Tabs(offset)
 		log.Info("there", "zone", zoneName, "offset", offset, "pretty", locName.name, "tabs", tabs)
@@ -83,38 +86,10 @@ func main() {
 	})
 
 	var namesAdjTabs []nameTabs
-	// Print at least back to UTC-12
+	// Print at least forward/back to UTC+/-12
 	startTab := min(namesTabs[0].tabs, offset2Tabs(-DAY/2))
 	endTab := max(namesTabs[len(namesTabs)-1].tabs, offset2Tabs(DAY/2))
 	log.Info("tab limits", "start", startTab, "end", endTab)
-	for _, nT := range namesTabs {
-		namesAdjTabs = append(namesAdjTabs, nameTabs{nT.name, nT.tabs - startTab})
-	}
-
-	refTime := now.In(refLoc)
-	//fmt.Println("now" + " local " + fmt.Sprintf("%v", refTime) + " utc " + fmt.Sprintf("%v", refTime.UTC()))
-	workStart := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_START, 0, 0, 0, refLoc)
-	workStartDiff := int(workStart.Sub(refTime).Seconds())
-	workStartTabs := offset2Tabs(workStartDiff)
-	//fmt.Println("work start" + " local " + fmt.Sprintf("%v", workStart) + " utc " + fmt.Sprintf("%v", workStart.UTC()))
-	//fmt.Println(" offset " + fmt.Sprintf("%v", workStartDiff) + " tabs " + fmt.Sprintf("%v", workStartTabs))
-	workEnd := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_END, 0, 0, 0, refLoc)
-	workEndDiff := int(workEnd.Sub(refTime).Seconds())
-	workEndTabs := offset2Tabs(workEndDiff)
-	//fmt.Println("work end" + " local " + fmt.Sprintf("%v", workEnd) + " utc " + fmt.Sprintf("%v", workEnd.UTC()))
-	//fmt.Println(" offset " + fmt.Sprintf("%v", workEndDiff) + " tabs " + fmt.Sprintf("%v", workEndTabs))
-	log.Info("work", "start offset", workStartDiff, "start tabs", workStartTabs, "end offset", workEndDiff, "end tabs", workEndTabs)
-	_, refOffset := refTime.Zone()
-	refTabs := offset2Tabs(refOffset)
-	workStartTabs += refTabs - startTab
-	workEndTabs += refTabs - startTab
-	log.Info("work adj", "start tabs", workStartTabs, "end tabs", workEndTabs)
-	workStartTabs = modulus(workStartTabs, DAY_WIDTH)
-	workEndTabs = modulus(workEndTabs, DAY_WIDTH)
-	log.Info("work mod", "start tabs", workStartTabs, "end tabs", workEndTabs)
-	workStartTabs = max(workStartTabs, namesAdjTabs[0].tabs)
-	workEndTabs = min(workEndTabs, namesAdjTabs[len(namesAdjTabs)-1].tabs)
-	log.Info("work capped", "start tabs", workStartTabs, "end tabs", workEndTabs)
 
 	// NB: this section runs in unadjusted numberspace
 	// TODO: run in adj space. You'll have to really think, esp what start and endTabs need to be
@@ -132,17 +107,57 @@ func main() {
 	if curTabs < endTab {
 		sb.WriteString(strings.Repeat(" ", endTab-curTabs))
 	}
+	tzs := sb.String()
 	// END unadjusted numberspace
 
-	runes := []rune(sb.String())
-	var render string
-	if workEndTabs < workStartTabs {
-		render = strings.ReplaceAll(string(runes[:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:]), " ", WORK_RUNE)
-	} else {
-		render = string(runes[:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:])
+	for _, nT := range namesTabs {
+		namesAdjTabs = append(namesAdjTabs, nameTabs{nT.name, nT.tabs - startTab})
 	}
 
-	fmt.Println(render)
+	for {
+		now := time.Now()
+		//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 4, 0, 0, 0, refLoc)
+		//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 12, 0, 0, 0, time.Local)
+		refTime := now.In(refLoc)
+
+		workStart := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_START, 0, 0, 0, refLoc)
+		workStartDiff := int(workStart.Sub(refTime).Seconds())
+		workStartTabs := offset2Tabs(workStartDiff)
+		workEnd := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_END, 0, 0, 0, refLoc)
+		workEndDiff := int(workEnd.Sub(refTime).Seconds())
+		workEndTabs := offset2Tabs(workEndDiff)
+		log.Info("work", "start offset", workStartDiff, "start tabs", workStartTabs, "end offset", workEndDiff, "end tabs", workEndTabs)
+
+		workStartTabs += refTabs - startTab
+		workEndTabs += refTabs - startTab
+		log.Info("work adj", "start tabs", workStartTabs, "end tabs", workEndTabs)
+
+		workStartTabs = modulus(workStartTabs, DAY_WIDTH)
+		workEndTabs = modulus(workEndTabs, DAY_WIDTH)
+		log.Info("work mod", "start tabs", workStartTabs, "end tabs", workEndTabs)
+
+		// TODO: is the cap still necc? If it's not, namesAdjTabs isn't needed either?
+		workStartTabs = max(workStartTabs, namesAdjTabs[0].tabs)
+		workEndTabs = min(workEndTabs, namesAdjTabs[len(namesAdjTabs)-1].tabs)
+		log.Info("work capped", "start tabs", workStartTabs, "end tabs", workEndTabs)
+
+		var render string
+		if workEndTabs < workStartTabs {
+			render = strings.ReplaceAll(tzs[:workEndTabs], " ", WORK_RUNE) + tzs[workEndTabs:workStartTabs] + strings.ReplaceAll(tzs[workStartTabs:], " ", WORK_RUNE)
+		} else {
+			render = tzs[:workStartTabs] + strings.ReplaceAll(tzs[workStartTabs:workEndTabs], " ", WORK_RUNE) + tzs[workEndTabs:]
+		}
+
+		fmt.Println(render)
+
+		select {
+		case <-signalCh:
+			return
+		case <-time.After(1 * time.Second):
+			continue
+		}
+
+	}
 }
 
 func offset2Tabs(offset int) int {
