@@ -1,9 +1,7 @@
 package main
 
 /* TODO
-* - should only be as wide as the timezones we have configured; don't show +/-12h just for the sake of it
-* - don't wrap; nz is >12 diff but is in the future so should be rendered to the right - see the variable width thing; should be more than 12hs' tabs in front of us
-* - test both of these by doing this and setting refZone to Alaska: nothing should be behind and everything ahead. Just cause we live in UTC0 we're used to being in the middle
+* - MAKE THIS AN OPTION - conditional the max/min lines for start/endTabs: should only be as wide as the timezones we have configured; don't show +/-12h just for the sake of it
  */
 
 import (
@@ -37,10 +35,10 @@ type nameTabs struct {
 }
 
 const (
-	PRINT_WIDTH = 50
-	DAY         = 86400
-	WORK_START  = 9
-	WORK_END    = 18
+	DAY_WIDTH  = 24
+	DAY        = 86400
+	WORK_START = 9
+	WORK_END   = 18
 	/* The issue with characters like this, is that if polybar is rendering
 	* us, for each character is searches its list of fonts until one
 	* contains the symbol. Thus the "ascii", eg ' ' and "es" will come from
@@ -54,10 +52,12 @@ const (
 )
 
 var (
-	// refLoc *time.Location = time.FixedZone("foo", -4*60*60)
+	//refLoc *time.Location = time.FixedZone("TEST", 0*60*60)
 	refLoc *time.Location = time.Local
 	log                   = scope.Register("main", "main package")
 )
+
+// TODO: long-lived
 
 func main() {
 	rootLog := zaplog.New() // Logs to stderr
@@ -65,18 +65,15 @@ func main() {
 	scope.SetAllScopes(telemetry.LevelDebug)
 
 	now := time.Now()
-	// now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 6, 0, 0, 0, time.Local)
-	refTime := now.In(refLoc)
-	_, refOffset := refTime.Zone()
-	startOffset := refOffset - DAY/2
-	log.Info("range", "ref", refOffset, "start", startOffset)
+	//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 4, 0, 0, 0, refLoc)
+	//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 12, 0, 0, 0, time.Local)
 
 	locs := getLocations()
 	var namesTabs []nameTabs
 	for _, locName := range locs {
-		there := now.In(locName.loc)
+		there := now.In(locName.loc) // This could be any time, but it needs to be like this year so the timezones actually exist
 		zoneName, offset := there.Zone()
-		tabs := offset2Tabs(offset, startOffset)
+		tabs := offset2Tabs(offset)
 		log.Info("there", "zone", zoneName, "offset", offset, "pretty", locName.name, "tabs", tabs)
 
 		namesTabs = append(namesTabs, nameTabs{locName.name, tabs})
@@ -85,8 +82,44 @@ func main() {
 		return namesTabs[i].tabs < namesTabs[j].tabs
 	})
 
+	var namesAdjTabs []nameTabs
+	// Print at least back to UTC-12
+	startTab := min(namesTabs[0].tabs, offset2Tabs(-DAY/2))
+	endTab := max(namesTabs[len(namesTabs)-1].tabs, offset2Tabs(DAY/2))
+	log.Info("tab limits", "start", startTab, "end", endTab)
+	for _, nT := range namesTabs {
+		namesAdjTabs = append(namesAdjTabs, nameTabs{nT.name, nT.tabs - startTab})
+	}
+
+	refTime := now.In(refLoc)
+	//fmt.Println("now" + " local " + fmt.Sprintf("%v", refTime) + " utc " + fmt.Sprintf("%v", refTime.UTC()))
+	workStart := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_START, 0, 0, 0, refLoc)
+	workStartDiff := int(workStart.Sub(refTime).Seconds())
+	workStartTabs := offset2Tabs(workStartDiff)
+	//fmt.Println("work start" + " local " + fmt.Sprintf("%v", workStart) + " utc " + fmt.Sprintf("%v", workStart.UTC()))
+	//fmt.Println(" offset " + fmt.Sprintf("%v", workStartDiff) + " tabs " + fmt.Sprintf("%v", workStartTabs))
+	workEnd := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_END, 0, 0, 0, refLoc)
+	workEndDiff := int(workEnd.Sub(refTime).Seconds())
+	workEndTabs := offset2Tabs(workEndDiff)
+	//fmt.Println("work end" + " local " + fmt.Sprintf("%v", workEnd) + " utc " + fmt.Sprintf("%v", workEnd.UTC()))
+	//fmt.Println(" offset " + fmt.Sprintf("%v", workEndDiff) + " tabs " + fmt.Sprintf("%v", workEndTabs))
+	log.Info("work", "start offset", workStartDiff, "start tabs", workStartTabs, "end offset", workEndDiff, "end tabs", workEndTabs)
+	_, refOffset := refTime.Zone()
+	refTabs := offset2Tabs(refOffset)
+	workStartTabs += refTabs - startTab
+	workEndTabs += refTabs - startTab
+	log.Info("work adj", "start tabs", workStartTabs, "end tabs", workEndTabs)
+	workStartTabs = modulus(workStartTabs, DAY_WIDTH)
+	workEndTabs = modulus(workEndTabs, DAY_WIDTH)
+	log.Info("work mod", "start tabs", workStartTabs, "end tabs", workEndTabs)
+	workStartTabs = max(workStartTabs, namesAdjTabs[0].tabs)
+	workEndTabs = min(workEndTabs, namesAdjTabs[len(namesAdjTabs)-1].tabs)
+	log.Info("work capped", "start tabs", workStartTabs, "end tabs", workEndTabs)
+
+	// NB: this section runs in unadjusted numberspace
+	// TODO: run in adj space. You'll have to really think, esp what start and endTabs need to be
 	var sb strings.Builder
-	curTabs := 0
+	curTabs := startTab
 	for _, nT := range namesTabs {
 		if nT.tabs >= curTabs {
 			sb.WriteString(strings.Repeat(" ", nT.tabs-curTabs)) // TODO: back off by half of the string's length. Everything should Just Work if you do that to all of them
@@ -96,36 +129,24 @@ func main() {
 			log.Debug("width calc", "name", nT.name, "len", len([]rune(nT.name)))
 		}
 	}
-
-	if curTabs < PRINT_WIDTH {
-		sb.WriteString(strings.Repeat(" ", PRINT_WIDTH-curTabs))
+	if curTabs < endTab {
+		sb.WriteString(strings.Repeat(" ", endTab-curTabs))
 	}
-
-	workStart := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_START, 0, 0, 0, refLoc)
-	workStartDiff := int(workStart.Sub(refTime).Seconds())
-	workStartTabs := offset2Tabs(workStartDiff, startOffset)
-	workEnd := time.Date(refTime.Year(), refTime.Month(), refTime.Day(), WORK_END, 0, 0, 0, refLoc)
-	workEndDiff := int(workEnd.Sub(refTime).Seconds())
-	workEndTabs := offset2Tabs(workEndDiff, startOffset)
-	log.Info("work", "start offset", workStartDiff, "start tabs", workStartTabs, "end offset", workEndDiff, "end tabs", workEndTabs)
+	// END unadjusted numberspace
 
 	runes := []rune(sb.String())
 	var render string
 	if workEndTabs < workStartTabs {
-		render = strings.ReplaceAll(string(runes[0:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:PRINT_WIDTH]), " ", WORK_RUNE)
+		render = strings.ReplaceAll(string(runes[:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:]), " ", WORK_RUNE)
 	} else {
-		render = string(runes[0:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:PRINT_WIDTH])
+		render = string(runes[:workStartTabs]) + strings.ReplaceAll(string(runes[workStartTabs:workEndTabs]), " ", WORK_RUNE) + string(runes[workEndTabs:])
 	}
 
 	fmt.Println(render)
 }
 
-func offset2Tabs(offset, startOffset int) int {
-	p := (offset - startOffset) % DAY
-	if p < 0 {
-		p = DAY + p
-	}
-	return int(float64(p) / DAY * PRINT_WIDTH)
+func offset2Tabs(offset int) int {
+	return int(float64(offset) / DAY * DAY_WIDTH)
 }
 
 type locName struct {
@@ -148,4 +169,9 @@ func getLocations() []locName {
 	}
 
 	return locs
+}
+
+// Calculates the actual modulus; the x86 instruction, the % operator, and math.Mod all calculate the remainder.
+func modulus(i, n int) int {
+	return ((i % n) + n) % n
 }
