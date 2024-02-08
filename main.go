@@ -85,7 +85,6 @@ func main() {
 		return namesTabs[i].tabs < namesTabs[j].tabs
 	})
 
-	var namesAdjTabs []nameTabs
 	// Print at least forward/back to UTC+/-12
 	startTab := min(namesTabs[0].tabs, offset2Tabs(-DAY/2))
 	endTab := max(namesTabs[len(namesTabs)-1].tabs, offset2Tabs(DAY/2))
@@ -110,10 +109,6 @@ func main() {
 	tzs := sb.String()
 	// END unadjusted numberspace
 
-	for _, nT := range namesTabs {
-		namesAdjTabs = append(namesAdjTabs, nameTabs{nT.name, nT.tabs - startTab})
-	}
-
 	for {
 		now := time.Now()
 		//now := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 4, 0, 0, 0, refLoc)
@@ -135,11 +130,6 @@ func main() {
 		workStartTabs = modulus(workStartTabs, DAY_WIDTH)
 		workEndTabs = modulus(workEndTabs, DAY_WIDTH)
 		log.Info("work mod", "start tabs", workStartTabs, "end tabs", workEndTabs)
-
-		// TODO: is the cap still necc? If it's not, namesAdjTabs isn't needed either?
-		workStartTabs = max(workStartTabs, namesAdjTabs[0].tabs)
-		workEndTabs = min(workEndTabs, namesAdjTabs[len(namesAdjTabs)-1].tabs)
-		log.Info("work capped", "start tabs", workStartTabs, "end tabs", workEndTabs)
 
 		var render string
 		if workEndTabs < workStartTabs {
