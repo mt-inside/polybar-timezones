@@ -91,7 +91,6 @@ func main() {
 	log.Info("tab limits", "start", startTab, "end", endTab)
 
 	// NB: this section runs in unadjusted numberspace
-	// TODO: run in adj space. You'll have to really think, esp what start and endTabs need to be
 	var sb strings.Builder
 	curTabs := startTab
 	for _, nT := range namesTabs {
