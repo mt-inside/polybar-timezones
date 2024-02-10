@@ -50,8 +50,9 @@ const (
 	* likely different widths */
 	// WORK_RUNE   = "▁"
 	// HERE_RUNE   = "📍"
-	WORK_RUNE = "_"
-	HERE_RUNE = "|"
+	SPACE_RUNE = "_"
+	WORK_RUNE  = "-"
+	HERE_RUNE  = "|"
 )
 
 var (
@@ -95,7 +96,7 @@ func main() {
 	curTabs := startTab
 	for _, nT := range namesTabs {
 		if nT.tabs >= curTabs {
-			sb.WriteString(strings.Repeat(" ", nT.tabs-curTabs)) // TODO: back off by half of the string's length. Everything should Just Work if you do that to all of them
+			sb.WriteString(strings.Repeat(SPACE_RUNE, nT.tabs-curTabs)) // TODO: back off by half of the string's length. Everything should Just Work if you do that to all of them
 			curTabs = nT.tabs
 			sb.WriteString(nT.name)         // The return value is bytes written, which isn't too useful
 			curTabs += len([]rune(nT.name)) // This isn't perfect; we really want the number of Grapheme Clusters, and even then, that's not necessarily the print-width in every font.
@@ -103,7 +104,7 @@ func main() {
 		}
 	}
 	if curTabs < endTab {
-		sb.WriteString(strings.Repeat(" ", endTab-curTabs))
+		sb.WriteString(strings.Repeat(SPACE_RUNE, endTab-curTabs))
 	}
 	tzs := sb.String()
 	// END unadjusted numberspace
@@ -132,9 +133,9 @@ func main() {
 
 		var render string
 		if workEndTabs < workStartTabs {
-			render = strings.ReplaceAll(tzs[:workEndTabs], " ", WORK_RUNE) + tzs[workEndTabs:workStartTabs] + strings.ReplaceAll(tzs[workStartTabs:], " ", WORK_RUNE)
+			render = strings.ReplaceAll(tzs[:workEndTabs], SPACE_RUNE, WORK_RUNE) + tzs[workEndTabs:workStartTabs] + strings.ReplaceAll(tzs[workStartTabs:], SPACE_RUNE, WORK_RUNE)
 		} else {
-			render = tzs[:workStartTabs] + strings.ReplaceAll(tzs[workStartTabs:workEndTabs], " ", WORK_RUNE) + tzs[workEndTabs:]
+			render = tzs[:workStartTabs] + strings.ReplaceAll(tzs[workStartTabs:workEndTabs], SPACE_RUNE, WORK_RUNE) + tzs[workEndTabs:]
 		}
 
 		fmt.Println(render)
